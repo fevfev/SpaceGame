@@ -24,7 +24,6 @@ class GameViewManager @Inject constructor() {
     private val _unlockedWeapons = MutableStateFlow(
         setOf(WeaponType.LASER, WeaponType.PLASMA, WeaponType.RAIL_GUN)
     )
-    val unlockedWeapons: StateFlow<Set<WeaponType>> = _unlockedWeapons
 
     // НАСТРОЙКИ ИГРЫ
     private val _gameSettings = MutableStateFlow(GameSettings())
@@ -71,10 +70,6 @@ class GameViewManager @Inject constructor() {
         println("💰 КРЕДИТЫ: было $oldCredits, добавили +$amount, стало $newCredits")
     }
 
-    fun getAvailableShips(): List<Ship> {
-        return Ship.getAllShips()
-    }
-
     fun getAvailableWeapons(): List<Weapon> {
         return Weapon.getAllWeapons().filter { weapon ->
             _unlockedWeapons.value.contains(weapon.type)
@@ -84,11 +79,6 @@ class GameViewManager @Inject constructor() {
     fun unlockWeapon(weaponType: WeaponType) {
         _unlockedWeapons.value = _unlockedWeapons.value + weaponType
         println("🔓 Разблокировано оружие: ${weaponType.name}")
-    }
-
-    fun unlockShip(shipType: ShipType) {
-        _unlockedShips.value = _unlockedShips.value + shipType
-        println("🔓 Разблокирован корабль: ${shipType.name}")
     }
 
     // НАСТРОЙКИ
@@ -106,18 +96,6 @@ class GameViewManager @Inject constructor() {
 
     fun toggleVibration() {
         _gameSettings.value = _gameSettings.value.copy(vibrationEnabled = !_gameSettings.value.vibrationEnabled)
-    }
-
-    // ДОСТИЖЕНИЯ
-    fun unlockAchievement(type: AchievementType) {
-        val currentAchievements = _achievements.value.toMutableList()
-        val index = currentAchievements.indexOfFirst { it.type == type }
-        if (index >= 0 && !currentAchievements[index].isUnlocked) {
-            currentAchievements[index] = currentAchievements[index].copy(isUnlocked = true)
-            _achievements.value = currentAchievements
-            addCredits(currentAchievements[index].reward)
-            println("🏆 Достижение разблокировано: ${currentAchievements[index].title}")
-        }
     }
 
     // АПГРЕЙДЫ

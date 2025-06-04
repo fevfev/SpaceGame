@@ -14,6 +14,8 @@ import kotlinx.coroutines.launch
 import kotlin.random.Random
 import javax.inject.Inject
 import com.students.spacegame.components.SoundManager
+import kotlin.math.cos
+import kotlin.math.sin
 
 @HiltViewModel
 class GameViewModel @Inject constructor(
@@ -54,122 +56,13 @@ class GameViewModel @Inject constructor(
      * Подробнее: https://kotlinlang.org/docs/enum-classes.html
      */
     private fun updateBullets(currentState: GameState): List<Bullet> {
-        return currentState.bullets.map { bullet -> // Движение с учётом angle (угла)
+        return currentState.bullets.map { bullet ->
+            // Движение с учётом angle (угла)
             val angleRad = Math.toRadians(bullet.angle.toDouble())
-            val dx = (Math.sin(angleRad) * bullet.speed).toFloat()
-            val dy = -(Math.cos(angleRad) * bullet.speed).toFloat() // вверх по экрану
+            val dx = (sin(angleRad) * bullet.speed).toFloat()
+            val dy = -(cos(angleRad) * bullet.speed).toFloat() // вверх по экрану
             bullet.copy(x = bullet.x + dx, y = bullet.y + dy)
         }.filter { it.y > -50f }
-    }
-
-    private fun handleBulletCollisions(
-        bullets: List<Bullet>,
-        enemies: List<Enemy>,
-        currentWeapon: Weapon,
-        onEnemyDestroyed: (Enemy) -> Unit
-    ): Pair<List<Bullet>, List<Enemy>> {
-        var finalBullets = bullets.toMutableList()
-        var finalEnemies = enemies.toMutableList()
-        val bulletsToRemove = mutableListOf<Bullet>()
-        val enemiesToRemove = mutableListOf<Enemy>()
-
-        finalBullets.forEach { bullet ->
-            var bulletHit = false
-
-            finalEnemies.forEach { enemy ->
-                if (checkCollision(bullet.x, bullet.y, enemy.x, enemy.y, 30f) && !bulletHit) {
-
-                    val damage = currentWeapon.damage
-                    val updatedEnemy = enemy.copy(health = enemy.health - damage)
-
-                    if (updatedEnemy.health <= 0) {
-                        enemiesToRemove.add(enemy)
-                        onEnemyDestroyed(enemy)
-
-                        // Эффект взрыва
-                        createExplosionEffect(enemy.x, enemy.y)
-                    } else {
-                        finalEnemies[finalEnemies.indexOf(enemy)] = updatedEnemy
-                    }
-
-                    // Специальные эффекты оружия
-                    when (currentWeapon.type) {
-                        WeaponType.RAIL_GUN -> {
-                            // Пробивает - пуля продолжает лететь
-                            bulletHit = false
-                        }
-                        WeaponType.LIGHTNING -> {
-                            // Поражает цепочку врагов
-                            chainLightningEffect(enemy, finalEnemies, damage / 2)
-                            bulletHit = true
-                        }
-                        WeaponType.FREEZE_RAY -> {
-                            // Замедляет врагов
-                            freezeNearbyEnemies(enemy.x, enemy.y, finalEnemies)
-                            bulletHit = true
-                        }
-                        WeaponType.NUKE -> {
-                            // Взрыв области
-                            explodeArea(enemy.x, enemy.y, finalEnemies, damage, onEnemyDestroyed)
-                            bulletHit = true
-                        }
-                        else -> {
-                            bulletHit = true
-                        }
-                    }
-
-                    if (bulletHit) {
-                        bulletsToRemove.add(bullet)
-                    }
-                }
-            }
-        }
-
-        finalBullets.removeAll(bulletsToRemove)
-        finalEnemies.removeAll(enemiesToRemove)
-
-        return Pair(finalBullets, finalEnemies)
-    }
-
-    private fun chainLightningEffect(hitEnemy: Enemy, enemies: MutableList<Enemy>, damage: Int) {
-        enemies.filter { enemy ->
-            enemy != hitEnemy && checkCollision(hitEnemy.x, hitEnemy.y, enemy.x, enemy.y, 120f)
-        }.take(2).forEach { nearbyEnemy ->
-            val index = enemies.indexOf(nearbyEnemy)
-            if (index >= 0) {
-                enemies[index] = nearbyEnemy.copy(health = nearbyEnemy.health - damage)
-            }
-        }
-    }
-
-    private fun freezeNearbyEnemies(x: Float, y: Float, enemies: MutableList<Enemy>) {
-        enemies.forEachIndexed { index, enemy ->
-            if (checkCollision(x, y, enemy.x, enemy.y, 80f)) {
-                enemies[index] = enemy.copy(speed = enemy.speed * 0.3f) // Замедляем на 70%
-            }
-        }
-    }
-
-    private fun explodeArea(x: Float, y: Float, enemies: MutableList<Enemy>, damage: Int, onEnemyDestroyed: (Enemy) -> Unit) {
-        enemies.filter { enemy ->
-            checkCollision(x, y, enemy.x, enemy.y, 100f)
-        }.forEach { enemy ->
-            val index = enemies.indexOf(enemy)
-            if (index >= 0) {
-                val updatedEnemy = enemy.copy(health = enemy.health - damage)
-                if (updatedEnemy.health <= 0) {
-                    enemies.removeAt(index)
-                    onEnemyDestroyed(enemy)
-                } else {
-                    enemies[index] = updatedEnemy
-                }
-            }
-        }
-    }
-
-    private fun createExplosionEffect(x: Float, y: Float) {
-        // Здесь будет логика создания эффекта взрыва
-        println("💥 Взрыв в точке ($x, $y)")
     }
 
     fun startGame() {
@@ -259,7 +152,7 @@ class GameViewModel @Inject constructor(
 
         // Спавн новых врагов
         val newEnemies = if (currentBoss == null && Random.nextFloat() < currentState.currentZone.enemySpawnRate) {
-            updatedEnemies + createRandomEnemy(currentState.currentZone)
+            updatedEnemies + createRandomEnemy()
         } else updatedEnemies
 
         // Спавн новых бонусов
@@ -347,7 +240,7 @@ class GameViewModel @Inject constructor(
         newBonuses.forEach { bonus ->
             if (checkCollision(newPlayer.x, newPlayer.y, bonus.x, bonus.y, 40f)) {
                 bonusesToRemove.add(bonus)
-                newPlayer = applyBonus(newPlayer, bonus.type, currentState)
+                newPlayer = applyBonus(newPlayer, bonus.type)
             }
         }
 
@@ -386,7 +279,7 @@ class GameViewModel @Inject constructor(
         }
     }
 
-    private fun applyBonus(player: PlayerState, bonusType: BonusType, currentState: GameState): PlayerState {
+    private fun applyBonus(player: PlayerState, bonusType: BonusType): PlayerState {
         return when (bonusType) {
             BonusType.SHIELD -> {
                 gameViewManager.addCredits(20)
@@ -414,50 +307,8 @@ class GameViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Обработка сбора бонуса.
-     * Если бонус типа WEAPON — случайно улучшаем оружие (веер, автонаведение, быстрая стрельба и т.д.).
-     * Пример для студентов: https://developer.android.com/kotlin/flow/stateflow-and-sharedflow
-     */
-    fun onBonusCollected(bonus: Bonus) {
-        val current = _gameState.value
-        when (bonus.type) {
-            BonusType.WEAPON -> {
-                // Случайное улучшение
-                val upgrades = listOf(
-                    WeaponUpgrade.SPREAD,
-                    WeaponUpgrade.HOMING,
-                    WeaponUpgrade.RAPID_FIRE,
-                    WeaponUpgrade.MULTISHOT,
-                    WeaponUpgrade.POWER_SHOT
-                )
-                val randomUpgrade = upgrades.random()
-                val upgradedWeapon = current.currentWeapon.copy(upgrade = randomUpgrade)
-                _gameState.value = current.copy(currentWeapon = upgradedWeapon)
-                // gameViewManager.selectWeapon(upgradedWeapon) // Больше не синхронизируем upgrade с GameViewManager
-            }
-            else -> {}
-        }
-    }
-
-    private fun onWaveCompleted(waveNumber: Int) {
-        val waveBonus = waveNumber * 100
-        gameViewManager.addCredits(waveBonus)
-        println("🌊 Волна $waveNumber завершена! Бонус: $waveBonus кредитов")
-    }
-
-    private fun onBossDefeated(boss: Boss) {
-        val bossBonus = 500
-        gameViewManager.addCredits(bossBonus)
-        gameViewManager.unlockAchievement(AchievementType.BOSS_DEFEATED)
-        soundManager.playSound("victory")
-        println("👑 Босс побежден! Бонус: $bossBonus кредитов")
-    }
-
     fun movePlayer(x: Float) {
         val currentState = _gameState.value
-        val speed = currentState.selectedShip.speed
-        val baseSpeed = if (currentState.player.hasSpeedBoost) speed * 1.5f else speed
 
         _gameState.value = currentState.copy(
             player = currentState.player.copy(x = x.coerceIn(50f, 750f))
@@ -557,8 +408,8 @@ class GameViewModel @Inject constructor(
         )
     }
 
-    private fun createRandomEnemy(zone: Zone): Enemy {
-        val type = EnemyType.values().random()
+    private fun createRandomEnemy(): Enemy {
+        val type = EnemyType.entries.toTypedArray().random()
         return Enemy(
             id = nextEnemyId++,
             type = type,
@@ -585,7 +436,7 @@ class GameViewModel @Inject constructor(
     private fun createRandomBonus(): Bonus {
         return Bonus(
             id = nextBonusId++,
-            type = BonusType.values().random(),
+            type = BonusType.entries.toTypedArray().random(),
             x = Random.nextFloat() * 700f + 50f,
             y = -30f
         )
