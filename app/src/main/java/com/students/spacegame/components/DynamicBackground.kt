@@ -6,14 +6,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import com.students.spacegame.R
 import com.students.spacegame.models.Zone
 import kotlin.math.*
@@ -24,7 +22,7 @@ fun DynamicBackground(
     currentZone: Zone,
     modifier: Modifier = Modifier
 ) {
-    val density = LocalDensity.current
+    LocalDensity.current
 
     // Анимации для звезд
     val infiniteTransition = rememberInfiniteTransition(label = "starfield")

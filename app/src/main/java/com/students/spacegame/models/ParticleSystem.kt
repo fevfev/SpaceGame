@@ -2,6 +2,8 @@ package com.students.spacegame.models
 
 
 import androidx.compose.ui.graphics.Color
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.random.Random
 
 
@@ -15,8 +17,8 @@ object ParticleFactory {
             Particle(
                 x = x,
                 y = y,
-                velocityX = (Math.cos(angle) * speed).toFloat(),
-                velocityY = (Math.sin(angle) * speed).toFloat(),
+                velocityX = (cos(angle) * speed).toFloat(),
+                velocityY = (sin(angle) * speed).toFloat(),
                 life = 1f,
                 maxLife = 1f,
                 color = color,

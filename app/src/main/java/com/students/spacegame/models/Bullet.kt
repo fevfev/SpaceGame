@@ -11,7 +11,7 @@ data class Bullet(
     val size: Float = 8f,
     val weaponType: WeaponType = WeaponType.LASER,
     val imageName: String = getBulletImage(WeaponType.LASER),
-    val angle: Float = 0f // Добавлено поле angle
+    val angle: Float = 0f
 ) {
     companion object {
         fun getBulletImage(weaponType: WeaponType): String {

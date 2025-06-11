@@ -2,11 +2,9 @@ package com.students.spacegame.components
 
 
 import android.Manifest
-import android.R.attr.start
 import android.content.Context
 import android.media.MediaPlayer
 import android.media.SoundPool
-import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.annotation.RequiresPermission
