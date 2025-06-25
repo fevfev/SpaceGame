@@ -16,6 +16,8 @@ import javax.inject.Inject
 import com.students.spacegame.components.SoundManager
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 
 @HiltViewModel
 class GameViewModel @Inject constructor(
@@ -31,6 +33,11 @@ class GameViewModel @Inject constructor(
     private var comboCount = 0
     private var lastKillTime = 0L
 
+    private var speedBoostJob: Job? = null
+    private var weaponBonusJob: Job? = null
+    private var invincibilityJob: Job? = null
+    private var originalWeapon: WeaponType? = null
+
     fun onEnemyKilled() {
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastKillTime < 3000) { // 3 секунды на комбо
@@ -40,6 +47,7 @@ class GameViewModel @Inject constructor(
             comboCount = 1
         }
         lastKillTime = currentTime
+        gameViewManager.checkAchievements(_gameState.value)
     }
 
     private var nextEnemyId = 0
@@ -86,7 +94,8 @@ class GameViewModel @Inject constructor(
 
     fun movePlayerLeft() {
         val currentState = _gameState.value
-        val newX = (currentState.player.x - currentState.selectedShip.speed * 5f).coerceAtLeast(50f)
+        val speedMultiplier = if (currentState.player.hasSpeedBoost) 1.7f else 1f
+        val newX = (currentState.player.x - currentState.selectedShip.speed * 5f * speedMultiplier).coerceAtLeast(50f)
         _gameState.value = currentState.copy(
             player = currentState.player.copy(x = newX)
         )
@@ -94,7 +103,8 @@ class GameViewModel @Inject constructor(
 
     fun movePlayerRight() {
         val currentState = _gameState.value
-        val newX = (currentState.player.x + currentState.selectedShip.speed * 5f).coerceAtMost(750f)
+        val speedMultiplier = if (currentState.player.hasSpeedBoost) 1.7f else 1f
+        val newX = (currentState.player.x + currentState.selectedShip.speed * 5f * speedMultiplier).coerceAtMost(750f)
         _gameState.value = currentState.copy(
             player = currentState.player.copy(x = newX)
         )
@@ -131,8 +141,10 @@ class GameViewModel @Inject constructor(
 
         // Обновление позиций врагов с учетом зоны
         val enemySpeedMultiplier = currentState.currentZone.enemySpeed
+        val maxEnemySpeed = 8f // Ограничение максимальной скорости
         val updatedEnemies = currentState.enemies.map { enemy ->
-            enemy.copy(y = enemy.y + enemy.speed * enemySpeedMultiplier)
+            val speed = (enemy.speed * enemySpeedMultiplier).coerceAtMost(maxEnemySpeed)
+            enemy.copy(y = enemy.y + speed)
         }.filter { it.y < 1000f }
 
         // Обновление позиций пуль с учетом оружия и upgrade
@@ -165,56 +177,82 @@ class GameViewModel @Inject constructor(
         var finalEnemies = newEnemies.toMutableList()
         var finalBullets = updatedBullets.toMutableList()
         var newPlayer = currentState.player
+        var playerDamaged = false
+        var playerShieldUsed = false
+        var playerInvincible = false
+        val enemiesHitPlayer = mutableSetOf<Enemy>()
+        for (enemy in finalEnemies) {
+            if (checkCollision(newPlayer.x, newPlayer.y, enemy.x, enemy.y, newPlayer.size + enemy.size)) {
+                if (newPlayer.isInvincible) {
+                    playerInvincible = true
+                    continue
+                } else if (newPlayer.hasShield) {
+                    playerShieldUsed = true
+                } else {
+                    playerDamaged = true
+                }
+                enemiesHitPlayer.add(enemy)
+            }
+        }
+        if (playerInvincible) {
+            // ничего не делаем
+        } else if (playerShieldUsed) {
+            newPlayer = newPlayer.copy(hasShield = false)
+        } else if (playerDamaged) {
+            newPlayer = newPlayer.copy(health = newPlayer.health - 1)
+        }
+        // Удаляем врагов, столкнувшихся с игроком
+        val filteredEnemies = finalEnemies.filter { it !in enemiesHitPlayer }
+        finalEnemies = filteredEnemies.toMutableList()
 
-        val bulletsToRemove = mutableListOf<Bullet>()
-        val enemiesToRemove = mutableListOf<Enemy>()
+        // Обработка столкновений с бонусами (applyBonus)
+        val bonusesToRemove = mutableListOf<Bonus>()
+        for (bonus in newBonuses) {
+            if (checkCollision(newPlayer.x, newPlayer.y, bonus.x, bonus.y, 40f)) {
+                bonusesToRemove.add(bonus)
+                newPlayer = applyBonus(newPlayer, bonus.type)
+            }
+        }
+        // После этого newPlayer больше не меняется до записи в GameState!
 
+        // Проверка спавна босса
+        if (currentBoss == null && newScore > 0 && newScore % 3000 == 0) {
+            currentBoss = Boss.createBoss(BossType.DESTROYER, 800f)
+        }
+
+        // Проверка смены зоны
+        val newZone = Zone.getAllZones().lastOrNull { it.requiredScore <= newScore }
+            ?: currentState.currentZone
+
+        // Проверка Game Over
+        val gameOver = newPlayer.health <= 0
+
+        // Проверка столкновений пуль с врагами
+        val bulletsToRemove = mutableSetOf<Bullet>()
+        val enemiesToRemove = mutableSetOf<Enemy>()
         finalBullets.forEach { bullet ->
-            finalEnemies.forEach { enemy ->
+            var bulletHit = false
+            for (enemy in finalEnemies) {
                 if (checkCollision(bullet.x, bullet.y, enemy.x, enemy.y, 30f)) {
-                    bulletsToRemove.add(bullet)
-
                     // Урон зависит от выбранного оружия
                     val damage = currentState.currentWeapon.damage
-                    println("Урон оружием ${currentState.currentWeapon.name}: $damage")
-
                     val updatedEnemy = enemy.copy(health = enemy.health - damage)
-                    if (updatedEnemy.health <= 0) {
+                    if (updatedEnemy.health <= 0 && !enemiesToRemove.contains(enemy)) {
                         enemiesToRemove.add(enemy)
                         newScore += enemy.points
-
-                        // Бонус кредитов
                         gameViewManager.addCredits(enemy.points / 10)
-                    } else {
+                        onEnemyKilled() // ВАЖНО: вызываем для комбо
+                    } else if (updatedEnemy.health > 0) {
                         finalEnemies[finalEnemies.indexOf(enemy)] = updatedEnemy
                     }
-
-                    // Специальные эффекты оружия
-                    when (currentState.currentWeapon.type) {
-                        WeaponType.RAIL_GUN -> {
-                            // Пробивает врагов - не убираем пулю
-                        }
-                        WeaponType.SPREAD_SHOT -> {
-                            // Обычная логика
-                        }
-                        WeaponType.LIGHTNING -> {
-                            // Поражает ближайших врагов
-                            finalEnemies.filter {
-                                it != enemy && checkCollision(enemy.x, enemy.y, it.x, it.y, 100f)
-                            }.take(2).forEach { nearbyEnemy ->
-                                val lightningDamage = finalEnemies.indexOf(nearbyEnemy)
-                                if (lightningDamage >= 0) {
-                                    finalEnemies[lightningDamage] = nearbyEnemy.copy(health = nearbyEnemy.health - 1)
-                                }
-                            }
-                        }
-                        else -> {
-                            // Стандартная логика
-                        }
+                    // Пули (кроме рейлгана) исчезают после первого попадания
+                    if (currentState.currentWeapon.type != WeaponType.RAIL_GUN) {
+                        bulletsToRemove.add(bullet)
+                        bulletHit = true
+                        break
                     }
                 }
             }
-
             // Столкновения с боссом
             currentBoss?.let { boss ->
                 if (checkCollision(bullet.x, bullet.y, boss.x, boss.y, boss.size)) {
@@ -228,41 +266,16 @@ class GameViewModel @Inject constructor(
                 }
             }
         }
-
         // Убираем пули (кроме рейлгана)
         if (currentState.currentWeapon.type != WeaponType.RAIL_GUN) {
             finalBullets.removeAll(bulletsToRemove)
         }
         finalEnemies.removeAll(enemiesToRemove)
 
-        // Проверка столкновений игрока с бонусами
-        val bonusesToRemove = mutableListOf<Bonus>()
-        newBonuses.forEach { bonus ->
-            if (checkCollision(newPlayer.x, newPlayer.y, bonus.x, bonus.y, 40f)) {
-                bonusesToRemove.add(bonus)
-                newPlayer = applyBonus(newPlayer, bonus.type)
-            }
-        }
-
-        val finalBonuses = newBonuses - bonusesToRemove.toSet()
-
-        // Проверка спавна босса
-        if (currentBoss == null && newScore > 0 && newScore % 3000 == 0) {
-            currentBoss = Boss.createBoss(BossType.DESTROYER, 800f)
-        }
-
-        // Проверка смены зоны
-        val newZone = Zone.getAllZones().lastOrNull { it.requiredScore <= newScore }
-            ?: currentState.currentZone
-
-        // Проверка Game Over
-        val gameOver = finalEnemies.any { it.y >= newPlayer.y - 50f } ||
-                newPlayer.health <= 0
-
         _gameState.value = currentState.copy(
             enemies = finalEnemies,
             bullets = finalBullets,
-            bonuses = finalBonuses,
+            bonuses = newBonuses - bonusesToRemove.toSet(),
             score = newScore,
             player = newPlayer,
             currentBoss = currentBoss,
@@ -276,6 +289,7 @@ class GameViewModel @Inject constructor(
 
         if (gameOver) {
             saveScore(newScore)
+            gameViewManager.checkAchievements(_gameState.value)
         }
     }
 
@@ -289,19 +303,44 @@ class GameViewModel @Inject constructor(
             BonusType.SPEED -> {
                 gameViewManager.addCredits(15)
                 soundManager.playSound("bonus_pickup")
+                speedBoostJob?.cancel()
+                if (!player.hasSpeedBoost) {
+                    speedBoostJob = viewModelScope.launch {
+                        delay(5000)
+                        _gameState.value = _gameState.value.copy(
+                            player = _gameState.value.player.copy(hasSpeedBoost = false)
+                        )
+                    }
+                }
                 player.copy(hasSpeedBoost = true)
             }
             BonusType.WEAPON -> {
                 gameViewManager.addCredits(50)
                 soundManager.playSound("bonus_pickup")
-                val allWeapons = Weapon.getAllWeapons()
-                val newWeapon = allWeapons.random()
-                gameViewManager.unlockWeapon(newWeapon.type)
-                player
+                weaponBonusJob?.cancel()
+                val original = player.weapon
+                if (player.weapon != WeaponType.SPREAD_SHOT) {
+                    weaponBonusJob = viewModelScope.launch {
+                        delay(10000)
+                        _gameState.value = _gameState.value.copy(
+                            player = _gameState.value.player.copy(weapon = original)
+                        )
+                    }
+                }
+                player.copy(weapon = WeaponType.SPREAD_SHOT)
             }
             BonusType.INVINCIBILITY -> {
                 gameViewManager.addCredits(30)
                 soundManager.playSound("bonus_pickup")
+                invincibilityJob?.cancel()
+                if (!player.isInvincible) {
+                    invincibilityJob = viewModelScope.launch {
+                        delay(5000)
+                        _gameState.value = _gameState.value.copy(
+                            player = _gameState.value.player.copy(isInvincible = false)
+                        )
+                    }
+                }
                 player.copy(isInvincible = true)
             }
         }
@@ -321,75 +360,56 @@ class GameViewModel @Inject constructor(
 
         val currentTime = System.currentTimeMillis()
         val fireRate = currentState.selectedShip.fireRate * currentState.currentWeapon.fireRate
-
-        // Проверяем скорострельность
         if (currentTime - lastShootTime < fireRate * 1000) return
-
         lastShootTime = currentTime
-        val weapon = currentState.currentWeapon
-
-        // Если есть upgrade, применяем его эффекты при выстреле
-        when (weapon.upgrade) {
-            WeaponUpgrade.SPREAD -> {
+        val weaponParams = currentState.currentWeapon
+        val weaponType = currentState.player.weapon
+        when (weaponType) {
+            WeaponType.SPREAD_SHOT -> {
                 val bullets = listOf(
-                    createBullet(currentState.player.x - 20f, currentState.player.y - 50f, weapon).copy(angle = -15f),
-                    createBullet(currentState.player.x, currentState.player.y - 50f, weapon).copy(angle = 0f),
-                    createBullet(currentState.player.x + 20f, currentState.player.y - 50f, weapon).copy(angle = 15f)
+                    createBullet(currentState.player.x - 20f, currentState.player.y - 50f, weaponParams).copy(angle = -15f, size = 14f),
+                    createBullet(currentState.player.x, currentState.player.y - 50f, weaponParams).copy(angle = 0f, size = 14f),
+                    createBullet(currentState.player.x + 20f, currentState.player.y - 50f, weaponParams).copy(angle = 15f, size = 14f)
                 )
                 _gameState.value = currentState.copy(
                     bullets = currentState.bullets + bullets
                 )
             }
-            WeaponUpgrade.MULTISHOT -> {
-                val bullets = listOf(
-                    createBullet(currentState.player.x - 40f, currentState.player.y - 50f, weapon).copy(angle = -25f),
-                    createBullet(currentState.player.x - 20f, currentState.player.y - 50f, weapon).copy(angle = -12f),
-                    createBullet(currentState.player.x, currentState.player.y - 50f, weapon).copy(angle = 0f),
-                    createBullet(currentState.player.x + 20f, currentState.player.y - 50f, weapon).copy(angle = 12f),
-                    createBullet(currentState.player.x + 40f, currentState.player.y - 50f, weapon).copy(angle = 25f)
-                )
-                _gameState.value = currentState.copy(
-                    bullets = currentState.bullets + bullets
-                )
-            }
-            WeaponUpgrade.RAPID_FIRE -> {
-                val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weapon)
+            WeaponType.RAIL_GUN -> {
+                val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weaponParams)
                 _gameState.value = currentState.copy(
                     bullets = currentState.bullets + newBullet
                 )
             }
-            WeaponUpgrade.HOMING -> {
-                val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weapon)
+            WeaponType.MISSILE -> {
+                val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weaponParams)
                 _gameState.value = currentState.copy(
                     bullets = currentState.bullets + newBullet
                 )
             }
-            WeaponUpgrade.POWER_SHOT -> {
-                val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weapon)
+            WeaponType.LIGHTNING -> {
+                val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weaponParams)
+                _gameState.value = currentState.copy(
+                    bullets = currentState.bullets + newBullet
+                )
+            }
+            WeaponType.FREEZE_RAY -> {
+                val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weaponParams)
+                _gameState.value = currentState.copy(
+                    bullets = currentState.bullets + newBullet
+                )
+            }
+            WeaponType.NUKE -> {
+                val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weaponParams)
                 _gameState.value = currentState.copy(
                     bullets = currentState.bullets + newBullet
                 )
             }
             else -> {
-                // Если нет upgrade, используем стандартную логику
-                when (weapon.type) {
-                    WeaponType.SPREAD_SHOT -> {
-                        val bullets = listOf(
-                            createBullet(currentState.player.x - 20f, currentState.player.y - 50f, weapon),
-                            createBullet(currentState.player.x, currentState.player.y - 50f, weapon),
-                            createBullet(currentState.player.x + 20f, currentState.player.y - 50f, weapon)
-                        )
-                        _gameState.value = currentState.copy(
-                            bullets = currentState.bullets + bullets
-                        )
-                    }
-                    else -> {
-                        val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weapon)
-                        _gameState.value = currentState.copy(
-                            bullets = currentState.bullets + newBullet
-                        )
-                    }
-                }
+                val newBullet = createBullet(currentState.player.x, currentState.player.y - 50f, weaponParams)
+                _gameState.value = currentState.copy(
+                    bullets = currentState.bullets + newBullet
+                )
             }
         }
     }

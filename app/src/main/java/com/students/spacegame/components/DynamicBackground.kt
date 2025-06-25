@@ -110,10 +110,10 @@ fun DynamicBackground(
 
         // АНИМИРОВАННЫЕ ЭЛЕМЕНТЫ
         Canvas(modifier = Modifier.fillMaxSize()) {
-            // Рисуем звезды с анимацией
+            // Звезды с анимацией
             drawAnimatedStars(stars, starTwinkle)
 
-            // Рисуем планеты на фоне
+            // Планеты на фоне
             drawBackgroundPlanets(backgroundPlanets, planetOffset)
 
             // Специальные эффекты по зонам

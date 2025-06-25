@@ -18,6 +18,8 @@ import com.students.spacegame.components.GameButton
 import com.students.spacegame.di.GameViewManagerEntryPoint
 import com.students.spacegame.models.UpgradeType
 import dagger.hilt.android.EntryPointAccessors
+import androidx.compose.material3.SnackbarHostState
+import kotlinx.coroutines.launch
 
 @Composable
 fun UpgradeScreen(
@@ -34,6 +36,15 @@ fun UpgradeScreen(
     val playerCredits by gameViewManager.playerCredits.collectAsState()
     val shipUpgrades by gameViewManager.shipUpgrades.collectAsState()
     val selectedShip by gameViewManager.selectedShip.collectAsState()
+
+    val snackbarHostState = SnackbarHostState()
+    val coroutineScope = rememberCoroutineScope()
+
+    var shouldNavigateBack by remember { mutableStateOf(false) }
+    if (shouldNavigateBack) {
+        onBackClick()
+        shouldNavigateBack = false
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AnimatedMenuBackground()
@@ -119,11 +130,19 @@ fun UpgradeScreen(
                         playerCredits = playerCredits,
                         onPurchase = {
                             gameViewManager.purchaseUpgrade(selectedShip.type, upgradeType)
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("Апгрейд применён!")
+                                shouldNavigateBack = true
+                            }
                         }
                     )
                 }
             }
         }
+        androidx.compose.material3.SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 

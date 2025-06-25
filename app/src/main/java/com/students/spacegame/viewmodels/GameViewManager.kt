@@ -131,6 +131,35 @@ class GameViewManager @Inject constructor() {
             playerCredits = _playerCredits.value
         )
     }
+
+    fun checkAchievements(gameState: GameState) {
+        val updated = _achievements.value.map { achievement ->
+            if (achievement.isUnlocked) return@map achievement
+            when (achievement.type) {
+                AchievementType.FIRST_KILL ->
+                    if (gameState.score > 0) achievement.copy(isUnlocked = true) else achievement
+                AchievementType.SCORE_1000 ->
+                    if (gameState.score >= 1000) achievement.copy(isUnlocked = true) else achievement
+                AchievementType.SCORE_5000 ->
+                    if (gameState.score >= 5000) achievement.copy(isUnlocked = true) else achievement
+                AchievementType.SCORE_10000 ->
+                    if (gameState.score >= 10000) achievement.copy(isUnlocked = true) else achievement
+                AchievementType.UNLOCK_ALL_SHIPS ->
+                    if (unlockedShips.value.size == Ship.getAllShips().size) achievement.copy(isUnlocked = true) else achievement
+                AchievementType.BOSS_DEFEATED ->
+                    if (gameState.currentBoss == null && gameState.status == GameStatus.BOSS_FIGHT) achievement.copy(isUnlocked = true) else achievement
+                AchievementType.PERFECT_WAVE ->
+                    if (gameState.player.health == gameState.selectedShip.maxHealth && gameState.status == GameStatus.PLAYING) achievement.copy(isUnlocked = true) else achievement
+                AchievementType.WEAPON_MASTER ->
+                    if (_unlockedWeapons.value.size == WeaponType.entries.size) achievement.copy(isUnlocked = true) else achievement
+                AchievementType.CREDITS_EARNED ->
+                    if (_playerCredits.value >= 1000) achievement.copy(isUnlocked = true) else achievement
+                AchievementType.COMBO_MASTER ->
+                    achievement // Добавьте свою логику для комбо
+            }
+        }
+        _achievements.value = updated
+    }
 }
 
 data class GameConfiguration(

@@ -7,7 +7,7 @@ enum class DifficultyLevel(
     val scoreMultiplier: Float,
     val enemySpawnRate: Float
 ) {
-    EASY("Легкий", 0.7f, 0.8f, 0.8f, 0.8f),
+    EASY("Легкий", 0.2f, 0.2f, 0.2f, 0.2f),
     NORMAL("Нормальный", 1f, 1f, 1f, 1f),
     HARD("Сложный", 1.3f, 1.5f, 1.5f, 1.3f),
     NIGHTMARE("Кошмар", 1.6f, 2f, 2f, 1.6f)
